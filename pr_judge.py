@@ -1,101 +1,187 @@
 import os
 import sys
+
 from dotenv import load_dotenv
 from github import Github, Auth
+
 from chunker import extract_functions
+from diff_engine import find_changed_functions
 from judge import compare_code
 
-load_dotenv()
 
-gh_token = os.environ.get("GITHUB_TOKEN")
-if not gh_token:
-    print("Ошибка: GITHUB_TOKEN не найден в .env")
-    sys.exit(1)
-
-auth = Auth.Token(gh_token)
-g = Github(auth=auth)
-
-
-def get_functions_dict(repo, filename: str, ref: str) -> dict:
-    """Скачивает файл на указанном ref и возвращает {имя_функции: код}."""
-    try:
-        file_data = repo.get_contents(filename, ref=ref)
-        source_code = file_data.decoded_content.decode("utf-8")
-    except Exception:
-        return {} 
-
-    functions = extract_functions(source_code)
-    return {fn["name"]: fn["code"] for fn in functions}
+def get_file_source(repo, filename: str, ref: str) -> str:
+    """Download a file from GitHub at a specific ref."""
+    file_data = repo.get_contents(filename, ref=ref)
+    return file_data.decoded_content.decode("utf-8")
 
 
 def analyze_pr(repo_name: str, pr_number: int):
-    print(f"Подключаемся к {repo_name}, Pull Request #{pr_number}...")
-    repo = g.get_repo(repo_name)
+    load_dotenv()
+
+    gh_token = os.environ.get("GITHUB_TOKEN")
+    if not gh_token:
+        print("Ошибка: GITHUB_TOKEN не найден в .env")
+        sys.exit(1)
+
+    auth = Auth.Token(gh_token)
+    github = Github(auth=auth)
+
+    print(
+        f"Подключаемся к {repo_name}, "
+        f"Pull Request #{pr_number}..."
+    )
+
+    repo = github.get_repo(repo_name)
     pr = repo.get_pull(pr_number)
 
-    files = pr.get_files()
-    final_review = "## 🤖 Ревью от AI Judge (старая vs новая версия)\n\n"
-    found_functions = False
-    votes = {"old": 0, "new": 0, "tie": 0}
+    final_review = (
+        "## 🤖 AI Diff Judge\n\n"
+        f"Comparing `{pr.base.ref}` → `{pr.head.ref}`\n\n"
+    )
 
-    for file in files:
+    votes = {
+        "old": 0,
+        "new": 0,
+        "tie": 0,
+    }
+
+    analyzed_functions = 0
+    changed_python_files = 0
+
+    for file in pr.get_files():
         if not file.filename.endswith(".py"):
             continue
 
-        print(f"\n[Файл: {file.filename}] Скачиваем старую и новую версии...")
+        patch = getattr(file, "patch", None)
 
-        old_funcs = get_functions_dict(repo, file.filename, pr.base.sha)
-        new_funcs = get_functions_dict(repo, file.filename, pr.head.sha)
-
-        if not new_funcs:
+        if not patch:
             continue
 
-        for name, new_code in new_funcs.items():
-            old_code = old_funcs.get(name)
+        changed_python_files += 1
 
-            if old_code is None:
-                final_review += f"### 🆕 Новая функция: `{name}` (Файл: `{file.filename}`)\n"
-                final_review += "Функция появилась впервые в этом PR.\n\n---\n"
-                found_functions = True
+        try:
+            old_source = get_file_source(
+                repo,
+                file.filename,
+                pr.base.sha,
+            )
+            new_source = get_file_source(
+                repo,
+                file.filename,
+                pr.head.sha,
+            )
+        except Exception as exc:
+            print(
+                f"Не удалось получить `{file.filename}`: {exc}"
+            )
+            continue
+
+        changed_functions = find_changed_functions(
+            old_source,
+            new_source,
+            patch,
+        )
+
+        if not changed_functions:
+            print(
+                f"[{file.filename}] "
+                "изменения есть, но изменённые функции не найдены."
+            )
+            continue
+
+        print(f"\n[Файл: {file.filename}]")
+
+        for item in changed_functions:
+            name = item["name"]
+            old_function = item["old"]
+            new_function = item["new"]
+
+            analyzed_functions += 1
+
+            changed_lines = ", ".join(
+                str(line)
+                for line in item["changed_new_lines"]
+            )
+
+            final_review += (
+                f"### 🔍 `{file.filename}::{name}`\n\n"
+                f"Changed lines: `{changed_lines}`\n\n"
+            )
+
+            print(
+                f"  ↳ {name} "
+                f"(new lines: {changed_lines})"
+            )
+
+            if old_function is None:
+                final_review += (
+                    "🆕 **New function**\n\n"
+                    "This function did not exist in the base version.\n\n"
+                    "---\n\n"
+                )
                 continue
 
-            if old_code.strip() == new_code.strip():
-                continue  
-
-            print(f"Сравниваем функцию: {name}...")
-            verdict = compare_code(name, old_code, new_code)
-
-            final_review += f"### 🔍 Функция: `{name}` (Файл: `{file.filename}`)\n"
-            final_review += f"**Победитель:** `{verdict['winner']}`\n\n"
-            final_review += f"{verdict['reason']}\n\n---\n"
-
-            votes[verdict["winner"]] = votes.get(verdict["winner"], 0) + 1
-            found_functions = True
-
-    if found_functions:
-        total = sum(votes.values())
-        if total > 0:
-            final_review += (
-                f"\n## 📊 Итоговый вердикт\n"
-                f"Old: {votes['old']} | New: {votes['new']} | Tie: {votes['tie']}\n\n"
+            verdict = compare_code(
+                name,
+                old_function["code"],
+                new_function["code"],
             )
-            if votes["new"] > votes["old"]:
-                final_review += "**Новая версия в целом лучше.** ✅\n"
-            elif votes["old"] > votes["new"]:
-                final_review += "**Старая версия была лучше — стоит пересмотреть изменения.** ⚠️\n"
-            else:
-                final_review += "**Ничья — явного улучшения не видно.**\n"
 
-        print("\nОтправляем комментарий в Pull Request...")
-        pr.create_issue_comment(final_review)
-        print("✅ Готово!")
+            winner = verdict.get("winner", "tie")
+
+            if winner not in votes:
+                winner = "tie"
+
+            votes[winner] += 1
+
+            final_review += (
+                f"**Winner:** `{winner}`\n\n"
+                f"{verdict.get('reason', '')}\n\n"
+                "---\n\n"
+            )
+
+    if changed_python_files == 0:
+        print("Изменённых Python-файлов в PR нет.")
+        return
+
+    if analyzed_functions == 0:
+        print(
+            "Python-файлы изменены, "
+            "но изменённых функций для AI review не найдено."
+        )
+        return
+
+    final_review += (
+        "## 📊 Summary\n\n"
+        f"Python files changed: **{changed_python_files}**\n\n"
+        f"Functions analyzed: **{analyzed_functions}**\n\n"
+        f"- Old: **{votes['old']}**\n"
+        f"- New: **{votes['new']}**\n"
+        f"- Tie: **{votes['tie']}**\n\n"
+    )
+
+    if votes["new"] > votes["old"]:
+        final_review += "**Overall: NEW is better.** ✅\n"
+    elif votes["old"] > votes["new"]:
+        final_review += "**Overall: OLD is better.** ⚠️\n"
     else:
-        print("Не найдено изменённых Python-функций для ревью.")
+        final_review += "**Overall: No clear winner.**\n"
+
+    print("\nОтправляем комментарий в Pull Request...")
+    pr.create_issue_comment(final_review)
+    print("✅ Готово!")
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Использование: python3 pr_judge.py <владелец/репозиторий> <номер_PR>")
+        print(
+            "Использование: "
+            "python3 pr_judge.py "
+            "<владелец/репозиторий> <номер_PR>"
+        )
         sys.exit(1)
 
-    analyze_pr(sys.argv[1], int(sys.argv[2]))
+    analyze_pr(
+        sys.argv[1],
+        int(sys.argv[2]),
+    )
