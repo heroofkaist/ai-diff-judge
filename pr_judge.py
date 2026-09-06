@@ -22,7 +22,7 @@ def get_functions_dict(repo, filename: str, ref: str) -> dict:
         file_data = repo.get_contents(filename, ref=ref)
         source_code = file_data.decoded_content.decode("utf-8")
     except Exception:
-        return {}  # файла может не быть на этом ref (например, новый файл в PR)
+        return {} 
 
     functions = extract_functions(source_code)
     return {fn["name"]: fn["code"] for fn in functions}
@@ -60,7 +60,7 @@ def analyze_pr(repo_name: str, pr_number: int):
                 continue
 
             if old_code.strip() == new_code.strip():
-                continue  # функция не менялась
+                continue  
 
             print(f"Сравниваем функцию: {name}...")
             verdict = compare_code(name, old_code, new_code)
