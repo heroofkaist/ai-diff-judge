@@ -54,3 +54,16 @@ def parse_diff(diff: str) -> dict:
         "added_lines": added_lines,
         "removed_lines": removed_lines,
     }
+
+def get_git_diff(old_ref: str, new_ref: str, file_path: str) -> str:
+    """Возвращает unified diff файла между двумя git refs."""
+    import subprocess
+
+    result = subprocess.run(
+        ["git", "diff", old_ref, new_ref, "--", file_path],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    return result.stdout

@@ -118,3 +118,12 @@ def test_parse_diff_ignores_no_newline_marker():
     assert result["removed_lines"] == [
         {"line": 2, "content": "    return 1"},
     ]
+
+def test_get_git_diff_returns_unified_diff():
+    from diff_engine import get_git_diff
+
+    diff = get_git_diff("be56c3a", "HEAD", "diff_engine.py")
+
+    assert "diff --git" in diff
+    assert "@@" in diff
+    assert "+import re" in diff
