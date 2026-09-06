@@ -45,3 +45,6 @@ def greet(name: str):
         print(f"=== Функция: {fn['name']} (строки {fn['start_line']}-{fn['end_line']}) ===")
         print(fn["code"].strip())
         print()
+
+def test_bug():
+    return 1 / 0
