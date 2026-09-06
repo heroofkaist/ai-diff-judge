@@ -2,8 +2,12 @@ import ast
 
 
 def extract_functions(source_code: str) -> list[dict]:
-    """Разбирает Python-код и возвращает список функций с их названиями и содержимым. фдукцкуцаывавфлф"""
-    tree = ast.parse(source_code)
+    """Разбирает Python-код и возвращает список функций с их названиями и содержимым."""
+    try:
+        tree = ast.parse(source_code)
+    except SyntaxError as e:
+        print(f"⚠️ Пропускаю файл — синтаксическая ошибка: {e}")
+        return []
     lines = source_code.splitlines(keepends=True)
     functions = []
     
