@@ -2,49 +2,64 @@ import ast
 
 
 def extract_functions(source_code: str) -> list[dict]:
-    """Разбирает Python-код и возвращает список функций с их названиями и содержимым."""
-    tree = ast.parse(source_code)
+    """Разбирает Python-код и возвращает список функций с их названиями,
+    полным путём (с учётом класса) и содержимым."""
+    try:
+        tree = ast.parse(source_code)
+    except SyntaxError as e:
+        print(f"⚠️ Пропускаю файл — синтаксическая ошибка: {e}")
+        return []
+
     lines = source_code.splitlines(keepends=True)
     functions = []
-    ##rewrwrewrwrw
-    
-    
 
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            # Определяем номера строк начала и конца функции
-            start_line = node.lineno - 1
-            end_line = node.end_lineno
+    def visit(node, class_stack):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                visit(child, class_stack + [child.name])
 
-            # Вырезаем исходный код функции
-            func_code = "".join(lines[start_line:end_line])
+            elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                qualified_name = ".".join(class_stack + [child.name])
+                start_line = child.lineno - 1
+                end_line = child.end_lineno
+                func_code = "".join(lines[start_line:end_line])
 
-            functions.append(
-                {
-                    "name": node.name,
-                    "code": func_code,
-                    "start_line": node.lineno,
-                    "end_line": node.end_lineno,
-                }
-            )
+                functions.append(
+                    {
+                        "name": child.name,
+                        "qualified_name": qualified_name,
+                        "code": func_code,
+                        "start_line": child.lineno,
+                        "end_line": child.end_lineno,
+                    }
+                )
+                # заходим внутрь на случай вложенных функций
+                visit(child, class_stack)
 
+            else:
+                visit(child, class_stack)
+
+    visit(tree, [])
     return functions
 
 
 if __name__ == "__main__":
     # Тестовый пример для проверки работы чанкера
     sample_code = """
+class Storage:
+    def save(self, item):
+        return True
+
+class Cache:
+    def save(self, item):
+        return False
+
 def add(a, b):
     return a + b
-
-def greet(name: str):
-    message = f"Hello, {name}!"
-    print(message)
-    return message
 """
 
     extracted = extract_functions(sample_code)
     for fn in extracted:
-        print(f"=== Функция: {fn['name']} (строки {fn['start_line']}-{fn['end_line']}) ===")
+        print(f"=== {fn['qualified_name']} (строки {fn['start_line']}-{fn['end_line']}) ===")
         print(fn["code"].strip())
         print()

@@ -21,7 +21,7 @@
     "function_name": "get_user_name",
     "old_code": "def get_user_name(user):\n    return user.first_name + ' ' + user.last_name",
     "new_code": "def get_user_name(user):\n    # returns user's name\n    return user.first_name + ' ' + user.last_name",
-    "human_label": "old"
+    "human_label": "tie"
   },
   {
     "function_name": "fetch_data",
@@ -39,7 +39,7 @@
     "function_name": "remove_duplicates",
     "old_code": "def remove_duplicates(items):\n    result = []\n    for item in items:\n        if item not in result:\n            result.append(item)\n    return result",
     "new_code": "def remove_duplicates(items):\n    return list(set(items))",
-    "human_label": "tie"
+    "human_label": "old"
   },
   {
     "function_name": "process_batch",

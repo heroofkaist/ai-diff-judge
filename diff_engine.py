@@ -166,7 +166,7 @@ def find_changed_functions(
     new_functions = extract_functions(new_source)
 
     old_by_name = {
-        function["name"]: function
+        function["qualified_name"]: function
         for function in old_functions
     }
 
@@ -186,7 +186,7 @@ def find_changed_functions(
             continue
 
         old_function = old_by_name.get(
-            new_function["name"]
+            new_function["qualified_name"]
         )
 
         touched_old_lines = []

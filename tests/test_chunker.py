@@ -3,15 +3,14 @@ import pytest
 from chunker import extract_functions
 
 
-def test_invalid_python_raises_syntax_error():
+def test_invalid_python_returns_empty_list():
     source = """
 def broken(
     return 123
 """
-
-    with pytest.raises(SyntaxError):
-        extract_functions(source)
-
+    result = extract_functions(source)
+    assert result == []
+    
 def test_extract_functions():
     source = """
 def add(a, b):
