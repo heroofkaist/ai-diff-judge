@@ -55,6 +55,13 @@ def add(a, b):
     return a + b
 """
 
+    extracted = extract_functions(sample_code)
+    for fn in extracted:
+        print(f"=== {fn['qualified_name']} (lines {fn['start_line']}-{fn['end_line']}) ===")
+        print(fn["code"].strip())
+        print()
+
+
 ##test.checking my project
 def factorial(n):
     result = 1
@@ -64,9 +71,3 @@ def factorial(n):
 
 print(factorial(5))
 ##test.checking my project
-
-    extracted = extract_functions(sample_code)
-    for fn in extracted:
-        print(f"=== {fn['qualified_name']} (lines {fn['start_line']}-{fn['end_line']}) ===")
-        print(fn["code"].strip())
-        print()
