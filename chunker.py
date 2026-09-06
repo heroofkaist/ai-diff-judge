@@ -6,8 +6,7 @@ def extract_functions(source_code: str) -> list[dict]:
     tree = ast.parse(source_code)
     lines = source_code.splitlines(keepends=True)
     functions = []
-    if (5>4):
-        bool c = true;
+    
     
 
     for node in ast.walk(tree):
