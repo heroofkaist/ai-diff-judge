@@ -1,0 +1,50 @@
+[
+  {
+    "function_name": "calculate_total",
+    "old_code": "def calculate_total(items):\n    total = 0\n    for item in items:\n        total = total + item.price\n    return total",
+    "new_code": "def calculate_total(items):\n    return sum(item.price for item in items)",
+    "human_label": "new"
+  },
+  {
+    "function_name": "is_valid_email",
+    "old_code": "def is_valid_email(email):\n    if '@' in email:\n        return True\n    return False",
+    "new_code": "def is_valid_email(email):\n    import re\n    pattern = r'^[^@]+@[^@]+\\.[^@]+$'\n    return bool(re.match(pattern, email))",
+    "human_label": "new"
+  },
+  {
+    "function_name": "divide",
+    "old_code": "def divide(a, b):\n    return a / b",
+    "new_code": "def divide(a, b):\n    if b == 0:\n        return None\n    return a / b",
+    "human_label": "new"
+  },
+  {
+    "function_name": "get_user_name",
+    "old_code": "def get_user_name(user):\n    return user.first_name + ' ' + user.last_name",
+    "new_code": "def get_user_name(user):\n    # returns user's name\n    return user.first_name + ' ' + user.last_name",
+    "human_label": "tie"
+  },
+  {
+    "function_name": "fetch_data",
+    "old_code": "def fetch_data(url):\n    response = requests.get(url)\n    return response.json()",
+    "new_code": "def fetch_data(url):\n    response = requests.get(url, timeout=10)\n    response.raise_for_status()\n    return response.json()",
+    "human_label": "new"
+  },
+  {
+    "function_name": "format_price",
+    "old_code": "def format_price(price):\n    return f'${price:.2f}'",
+    "new_code": "def format_price(price):\n    return '$' + str(round(price, 2))",
+    "human_label": "old"
+  },
+  {
+    "function_name": "remove_duplicates",
+    "old_code": "def remove_duplicates(items):\n    result = []\n    for item in items:\n        if item not in result:\n            result.append(item)\n    return result",
+    "new_code": "def remove_duplicates(items):\n    return list(set(items))",
+    "human_label": "old"
+  },
+  {
+    "function_name": "process_batch",
+    "old_code": "def process_batch(items):\n    results = []\n    for item in items:\n        results.append(process(item))\n    return results",
+    "new_code": "def process_batch(items):\n    results = []\n    for item in items:\n        try:\n            results.append(process(item))\n        except Exception:\n            pass\n    return results",
+    "human_label": "old"
+  }
+]
