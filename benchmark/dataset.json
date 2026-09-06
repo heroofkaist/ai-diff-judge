@@ -1,0 +1,12 @@
+[
+  {
+    "name": "safe_divide",
+    "code": "def safe_divide(a, b):\n    if b == 0:\n        return 0\n    return a / b",
+    "has_bug": false
+  },
+  {
+    "name": "unsafe_divide",
+    "code": "def unsafe_divide(a, b):\n    return a / b",
+    "has_bug": true
+  }
+]
