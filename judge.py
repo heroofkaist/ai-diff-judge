@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 from dotenv import load_dotenv
 from openai import OpenAI
 from chunker import extract_functions
@@ -59,3 +60,47 @@ if __name__ == "__main__":
         print(f"=== Ревью функции: {fn['name']} ===")
         print("="*40)
         print(evaluate_code(fn["name"], fn["code"]))
+
+def compare_code(function_name: str, old_code: str, new_code: str) -> dict:
+    """Сравнивает старую и новую версию функции, возвращает {'winner': ..., 'reason': ...}."""
+    prompt = f"""
+Ты строгий, но справедливый проверяющий кода (Code Judge).
+Сравни СТАРУЮ и НОВУЮ версии одной и той же функции по критериям:
+читаемость, риск ошибок, эффективность.
+
+Ответь СТРОГО в формате JSON, без markdown и лишнего текста:
+{{"winner": "old" | "new" | "tie", "reason": "краткое объяснение на русском"}}
+
+Имя функции: '{function_name}'
+
+СТАРАЯ версия:
+```python
+{old_code}
+```
+
+НОВАЯ версия:
+```python
+{new_code}
+```
+"""
+    response = client.chat.completions.create(
+        model="openai/gpt-oss-20b",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.0,
+    )
+
+    raw = response.choices[0].message.content.strip()
+
+    # Модель иногда оборачивает JSON в ```json ... ``` — убираем это
+    if raw.startswith("```"):
+        raw = raw.strip("`").replace("json", "", 1).strip()
+
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError:
+        result = {"winner": "tie", "reason": f"Не удалось распарсить ответ модели: {raw[:200]}"}
+
+    if result.get("winner") not in ("old", "new", "tie"):
+        result["winner"] = "tie"
+
+    return result
