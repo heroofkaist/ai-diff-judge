@@ -33,14 +33,12 @@ def evaluate_code(function_name: str, function_code: str) -> str:
     return response.choices[0].message.content
 
 if __name__ == "__main__":
-    # Проверяем, передал ли пользователь имя файла в терминале
     if len(sys.argv) < 2:
         print("Использование: python3 judge.py <имя_файла.py>")
         sys.exit(1)
         
     file_path = sys.argv[1]
     
-    # Пытаемся прочитать файл
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             source_code = f.read()
@@ -91,7 +89,6 @@ def compare_code(function_name: str, old_code: str, new_code: str) -> dict:
 
     raw = response.choices[0].message.content.strip()
 
-    # Модель иногда оборачивает JSON в ```json ... ``` — убираем это
     if raw.startswith("```"):
         raw = raw.strip("`").replace("json", "", 1).strip()
 

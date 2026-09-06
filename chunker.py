@@ -14,12 +14,10 @@ def extract_functions(source_code: str) -> list[dict]:
     
 
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            # Определяем номера строк начала и конца функции
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):]
             start_line = node.lineno - 1
             end_line = node.end_lineno
 
-            # Вырезаем исходный код функции
             func_code = "".join(lines[start_line:end_line])
 
             functions.append(
@@ -35,7 +33,6 @@ def extract_functions(source_code: str) -> list[dict]:
 
 
 if __name__ == "__main__":
-    # Тестовый пример для проверки работы чанкера
     sample_code = """
 def add(a, b):
     return a + b
