@@ -48,3 +48,6 @@ def greet(name: str):
 
 def test_bug():
     return 1 / 0
+
+
+# тест действия
