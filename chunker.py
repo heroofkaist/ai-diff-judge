@@ -56,6 +56,14 @@ def add(a, b):
 """
 
 ##test.checking my project
+def factorial(n):
+    result = 1
+    for i in range(1, n + 1):
+        result *= i
+    return result
+
+print(factorial(5))
+##test.checking my project
 
     extracted = extract_functions(sample_code)
     for fn in extracted:
