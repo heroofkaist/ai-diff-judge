@@ -3,25 +3,19 @@ import ast
 
 def extract_functions(source_code: str) -> list[dict]:
     """Разбирает Python-код и возвращает список функций с их названиями и содержимым."""
-    try:
-        tree = ast.parse(source_code)
-    except SyntaxError as e:
-        print(f"⚠️ Пропускаю файл — синтаксическая ошибка: {e}")
-        return []
+    tree = ast.parse(source_code)
     lines = source_code.splitlines(keepends=True)
     functions = []
     
     
 
     for node in ast.walk(tree):
-<<<<<<< HEAD
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-=======
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):]
->>>>>>> test-compare
+            # Определяем номера строк начала и конца функции
             start_line = node.lineno - 1
             end_line = node.end_lineno
 
+            # Вырезаем исходный код функции
             func_code = "".join(lines[start_line:end_line])
 
             functions.append(
@@ -37,6 +31,7 @@ def extract_functions(source_code: str) -> list[dict]:
 
 
 if __name__ == "__main__":
+    # Тестовый пример для проверки работы чанкера
     sample_code = """
 def add(a, b):
     return a + b
