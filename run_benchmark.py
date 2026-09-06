@@ -11,9 +11,21 @@ client = OpenAI(
 
 def check_for_bugs(function_code: str) -> bool:
     prompt = f"""
-    Does this Python function have potential bugs, vulnerabilities, or missing critical logic (like division by zero)?
-    Answer ONLY with 'YES' or 'NO'. No explanations.
-
+    Determine if this Python function contains actual bugs or vulnerabilities.
+    Answer ONLY 'YES' if it contains a bug, or 'NO' if it is safe. No explanations.
+    
+    Consider these as BUGS (YES):
+    - Unhandled runtime exceptions (e.g. division by zero)
+    - SQL injection vulnerabilities (e.g. string formatting in queries)
+    - Mutable default arguments (e.g. target_list=[])
+    - Resource leaks (e.g. opening a file without closing it)
+    
+    Consider these as SAFE (NO):
+    - Returning a fallback value like 0 for edge cases.
+    - Using context managers ('with' statement) for safe file handling.
+    - Safe default arguments (e.g. target_list=None).
+    - Parameterized SQL queries.
+    
     Code:
     ```python
     {function_code}
@@ -22,7 +34,7 @@ def check_for_bugs(function_code: str) -> bool:
     response = client.chat.completions.create(
         model="openai/gpt-oss-20b",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.0, # 0.0 делает ответы максимально стабильными
+        temperature=0.0, 
     )
     answer = response.choices[0].message.content.strip().upper()
     return "YES" in answer

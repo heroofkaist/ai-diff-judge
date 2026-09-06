@@ -8,5 +8,35 @@
     "name": "unsafe_divide",
     "code": "def unsafe_divide(a, b):\n    return a / b",
     "has_bug": true
+  },
+  {
+    "name": "sql_injection",
+    "code": "def get_user_by_id(db, user_id):\n    query = f\"SELECT * FROM users WHERE id = '{user_id}'\"\n    return db.execute(query)",
+    "has_bug": true
+  },
+  {
+    "name": "safe_sql_query",
+    "code": "def get_user_by_id(db, user_id):\n    query = \"SELECT * FROM users WHERE id = :user_id\"\n    return db.execute(query, {'user_id': user_id})",
+    "has_bug": false
+  },
+  {
+    "name": "mutable_default_argument",
+    "code": "def append_to_list(value, target_list=[]):\n    target_list.append(value)\n    return target_list",
+    "has_bug": true
+  },
+  {
+    "name": "safe_default_argument",
+    "code": "def append_to_list(value, target_list=None):\n    if target_list is None:\n        target_list = []\n    target_list.append(value)\n    return target_list",
+    "has_bug": false
+  },
+  {
+    "name": "unclosed_file",
+    "code": "def read_log(path):\n    f = open(path, 'r')\n    data = f.read()\n    return data",
+    "has_bug": true
+  },
+  {
+    "name": "safe_context_manager",
+    "code": "def read_log(path):\n    with open(path, 'r', encoding='utf-8') as f:\n        return f.read()",
+    "has_bug": false
   }
 ]
