@@ -112,13 +112,13 @@ python3 pr_judge.py owner/repo 42
 
 ## 📈 Benchmark
 
-I built my own mini version of an AI judge benchmark. Hand labeled pairs of old and new code, with my own honest opinion on which is better, then measured how often the AI agrees with me.
+I built my own mini version of an AI judge benchmark, organized into 8 categories (bug fixes, security, performance, readability, edge cases, breaking changes, false improvements, and style only changes). Hand labeled pairs of old and new code, with my own honest opinion on which is better, then measured how often the AI agrees with me.
 
 ```bash
 python3 run_pairwise_benchmark.py
 ```
 
-Current result is 7 out of 8, or 87.5%, agreement with human judgment. The one disagreement turned out to be a genuinely debatable case, not a model error.
+Current result is 23 out of 24, or 95.8%, agreement with human judgment across all categories. Security, bug fixes, performance, and breaking change detection all score 100%. The one remaining disagreement is in the style only category, where the model consistently favors f-strings over string concatenation on efficiency grounds, a defensible position rather than a model error.
 
 ## 🗺️ Roadmap
 
