@@ -6,7 +6,7 @@ from github import Github, Auth
 
 from chunker import extract_functions
 from diff_engine import find_changed_functions
-from judge import compare_code
+from judge import score_code
 
 
 def get_file_source(repo, filename: str, ref: str) -> str:
@@ -39,11 +39,8 @@ def analyze_pr(repo_name: str, pr_number: int):
         f"Comparing `{pr.base.ref}` → `{pr.head.ref}`\n\n"
     )
 
-    votes = {
-        "old": 0,
-        "new": 0,
-        "tie": 0,
-    }
+    total_delta = 0.0
+    all_bugs = []
 
     analyzed_functions = 0
     changed_python_files = 0
@@ -121,22 +118,29 @@ def analyze_pr(repo_name: str, pr_number: int):
                 )
                 continue
 
-            verdict = compare_code(
+            verdict = score_code(
                 name,
                 old_function["code"],
                 new_function["code"],
             )
 
-            winner = verdict.get("winner", "tie")
+            total_delta += verdict.get("weighted_delta", 0)
+            all_bugs.extend(verdict.get("bugs_found", []))
 
-            if winner not in votes:
-                winner = "tie"
-
-            votes[winner] += 1
+            criteria_rows = "\n".join(
+                f"| {criterion.capitalize()} | "
+                f"{verdict.get(criterion, {}).get('old', '?')} | "
+                f"{verdict.get(criterion, {}).get('new', '?')} | "
+                f"{verdict.get(criterion, {}).get('reason', '')} |"
+                for criterion in ("correctness", "security", "performance", "readability")
+            )
 
             final_review += (
-                f"**Winner:** `{winner}`\n\n"
-                f"{verdict.get('reason', '')}\n\n"
+                f"**Winner:** `{verdict.get('winner', 'tie')}` "
+                f"(confidence: {verdict.get('confidence', 0.0):.2f})\n\n"
+                f"| Criterion | Old | New | Notes |\n"
+                f"|---|---|---|---|\n"
+                f"{criteria_rows}\n\n"
                 "---\n\n"
             )
 
@@ -155,17 +159,20 @@ def analyze_pr(repo_name: str, pr_number: int):
         "## 📊 Summary\n\n"
         f"Python files changed: **{changed_python_files}**\n\n"
         f"Functions analyzed: **{analyzed_functions}**\n\n"
-        f"- Old: **{votes['old']}**\n"
-        f"- New: **{votes['new']}**\n"
-        f"- Tie: **{votes['tie']}**\n\n"
+        f"Total weighted delta: **{total_delta:+.1f}**\n\n"
     )
 
-    if votes["new"] > votes["old"]:
+    if total_delta > 0:
         final_review += "**Overall: NEW is better.** ✅\n"
-    elif votes["old"] > votes["new"]:
+    elif total_delta < 0:
         final_review += "**Overall: OLD is better.** ⚠️\n"
     else:
         final_review += "**Overall: No clear winner.**\n"
+
+    if all_bugs:
+        final_review += "\n## 🐛 Bugs found\n\n"
+        for bug in all_bugs:
+            final_review += f"- {bug}\n"
 
     print("\nОтправляем комментарий в Pull Request...")
     pr.create_issue_comment(final_review)

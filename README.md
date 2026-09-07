@@ -120,11 +120,14 @@ python3 run_pairwise_benchmark.py
 
 Current result is 23 out of 24, or 95.8%, agreement with human judgment across all categories. Security, bug fixes, performance, and breaking change detection all score 100%. The one remaining disagreement is in the style only category, where the model consistently favors f-strings over string concatenation on efficiency grounds, a defensible position rather than a model error.
 
+## ⚠️ Known limitation
+
+Each function is judged in isolation, without seeing the rest of the diff or the wider codebase. This means the model can flag a false alarm when a function calls something defined elsewhere in the same change, since it has no way to confirm that the called function actually exists. In one real test, it warned that a new `score_code` import might not exist, even though the function was defined a few lines away in a sibling file within the very same diff.
+
+This mirrors a known challenge in AI-based code and video judging generally, closely related to what the WorldReward paper (arXiv:2609.03952) calls "localized evidence": judging a small slice of change accurately, without losing the surrounding context that explains it. A more complete fix would involve passing broader context (e.g. the full diff, or a symbol table of the change) into the prompt, rather than judging each function as a fully self-contained unit.
+
 ## 🗺️ Roadmap
 
-* Weighted scoring, so a correctness regression outweighs three cosmetic improvements.
-* Per criterion breakdown covering correctness, readability, performance, and security.
-* Handle files that are renamed and modified at the same time.
 * Bigger benchmark dataset.
 * Inline diff comments instead of one big summary comment.
 

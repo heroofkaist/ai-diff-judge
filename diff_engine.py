@@ -1,3 +1,4 @@
+import difflib
 import re
 import subprocess
 from pathlib import Path
@@ -58,6 +59,21 @@ def parse_diff(diff: str) -> dict:
     }
 
 
+def diff_from_contents(old_content: str, new_content: str) -> str:
+    """Build a unified diff from two in-memory file contents.
+
+    Needed for renamed files: their path differs between old and new
+    version, so a plain `git diff <ref1> <ref2> -- path` cannot compare
+    them directly.
+    """
+    diff_lines = difflib.unified_diff(
+        old_content.splitlines(),
+        new_content.splitlines(),
+        lineterm="",
+    )
+    return "\n".join(diff_lines)
+
+
 def get_git_diff(
     old_ref: str,
     new_ref: str,
@@ -87,8 +103,11 @@ def get_git_diff_name_status(
     old_ref: str,
     new_ref: str,
     repo_path: str | Path = ".",
-) -> list[tuple[str, str]]:
-    """Return changed files as (status, path)."""
+) -> list[tuple[str, str, str]]:
+    """Return changed files as (status, old_path, new_path).
+
+    For non-renamed files, old_path and new_path are identical.
+    """
     result = subprocess.run(
         [
             "git",
@@ -109,10 +128,15 @@ def get_git_diff_name_status(
     for line in result.stdout.splitlines():
         parts = line.split("\t")
 
-        if len(parts) >= 2:
-            changes.append(
-                (parts[0], parts[-1])
-            )
+        if not parts or not parts[0]:
+            continue
+
+        status = parts[0]
+
+        if status.startswith("R") and len(parts) == 3:
+            changes.append((status, parts[1], parts[2]))
+        elif len(parts) >= 2:
+            changes.append((status, parts[1], parts[1]))
 
     return changes
 

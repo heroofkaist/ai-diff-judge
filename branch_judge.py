@@ -1,11 +1,55 @@
 import argparse
 
 from diff_engine import (
+    diff_from_contents,
     find_changed_functions,
     get_file_at_ref,
     get_git_diff,
     get_git_diff_name_status,
 )
+
+
+def _add_function_items(
+    report, path, base_ref, head_ref, old_path, new_path,
+    use_ai, repo_path, extra_file_fields=None,
+):
+    old_source = get_file_at_ref(base_ref, old_path, repo_path=repo_path)
+    new_source = get_file_at_ref(head_ref, new_path, repo_path=repo_path)
+
+    if old_path == new_path:
+        diff = get_git_diff(base_ref, head_ref, new_path, repo_path=repo_path)
+    else:
+        diff = diff_from_contents(old_source, new_source)
+
+    if not diff:
+        return
+
+    changed_functions = find_changed_functions(old_source, new_source, diff)
+
+    file_entry = {"status": None, "path": path, "changed_functions": len(changed_functions)}
+    if extra_file_fields:
+        file_entry.update(extra_file_fields)
+    report["files"].append(file_entry)
+
+    for function in changed_functions:
+        item = {
+            "path": path,
+            "name": function["name"],
+            "type": "new" if function["old"] is None else "modified",
+            "changed_new_lines": function["changed_new_lines"],
+            "changed_old_lines": function["changed_old_lines"],
+        }
+
+        if use_ai and function["old"] is not None:
+            from judge import score_code
+
+            item["verdict"] = score_code(
+                function["name"],
+                function["old"]["code"],
+                function["new"]["code"],
+            )
+
+        report["functions"].append(item)
 
 
 def analyze_branch_pair(
@@ -16,11 +60,7 @@ def analyze_branch_pair(
 ) -> dict:
     """Compare two local git refs inside a specific repository."""
 
-    changes = get_git_diff_name_status(
-        base_ref,
-        head_ref,
-        repo_path=repo_path,
-    )
+    changes = get_git_diff_name_status(base_ref, head_ref, repo_path=repo_path)
 
     report = {
         "base": base_ref,
@@ -29,112 +69,49 @@ def analyze_branch_pair(
         "functions": [],
     }
 
-    for status, path in changes:
-        if not path.endswith(".py"):
+    for status, old_path, new_path in changes:
+        if not new_path.endswith(".py"):
             continue
 
-        file_result = {
-            "status": status,
-            "path": path,
-        }
-
         if status.startswith("A"):
-            report["files"].append(file_result)
+            report["files"].append({"status": status, "path": new_path})
             report["functions"].append(
-                {
-                    "path": path,
-                    "name": None,
-                    "type": "added_file",
-                    "changed_new_lines": [],
-                    "changed_old_lines": [],
-                }
+                {"path": new_path, "name": None, "type": "added_file",
+                 "changed_new_lines": [], "changed_old_lines": []}
             )
             continue
 
         if status.startswith("D"):
-            report["files"].append(file_result)
+            report["files"].append({"status": status, "path": new_path})
             report["functions"].append(
-                {
-                    "path": path,
-                    "name": None,
-                    "type": "deleted_file",
-                    "changed_new_lines": [],
-                    "changed_old_lines": [],
-                }
+                {"path": new_path, "name": None, "type": "deleted_file",
+                 "changed_new_lines": [], "changed_old_lines": []}
             )
             continue
 
         if status.startswith("R"):
-            report["files"].append(file_result)
-            report["functions"].append(
-                {
-                    "path": path,
-                    "name": None,
-                    "type": "renamed_file",
-                    "changed_new_lines": [],
-                    "changed_old_lines": [],
-                }
+            if status == "R100":
+                report["files"].append(
+                    {"status": status, "path": new_path, "renamed_from": old_path}
+                )
+                report["functions"].append(
+                    {"path": new_path, "name": None, "type": "renamed_file",
+                     "changed_new_lines": [], "changed_old_lines": []}
+                )
+                continue
+
+            _add_function_items(
+                report, new_path, base_ref, head_ref, old_path, new_path,
+                use_ai, repo_path,
+                extra_file_fields={"status": status, "renamed_from": old_path},
             )
             continue
 
-        diff = get_git_diff(
-            base_ref,
-            head_ref,
-            path,
-            repo_path=repo_path,
+        _add_function_items(
+            report, new_path, base_ref, head_ref, new_path, new_path,
+            use_ai, repo_path,
+            extra_file_fields={"status": status},
         )
-
-        if not diff:
-            continue
-
-        old_source = get_file_at_ref(
-            base_ref,
-            path,
-            repo_path=repo_path,
-        )
-
-        new_source = get_file_at_ref(
-            head_ref,
-            path,
-            repo_path=repo_path,
-        )
-
-        changed_functions = find_changed_functions(
-            old_source,
-            new_source,
-            diff,
-        )
-
-        report["files"].append(
-            {
-                **file_result,
-                "changed_functions": len(changed_functions),
-            }
-        )
-
-        for function in changed_functions:
-            item = {
-                "path": path,
-                "name": function["name"],
-                "type": (
-                    "new"
-                    if function["old"] is None
-                    else "modified"
-                ),
-                "changed_new_lines": function["changed_new_lines"],
-                "changed_old_lines": function["changed_old_lines"],
-            }
-
-            if use_ai and function["old"] is not None:
-                from judge import score_code
-
-                item["verdict"] = score_code(
-                    function["name"],
-                    function["old"]["code"],
-                    function["new"]["code"],
-                )
-
-            report["functions"].append(item)
 
     return report
 
@@ -157,9 +134,10 @@ def print_report(report: dict) -> None:
     print("-" * 60)
 
     for file in report["files"]:
-        print(
-            f"{file['status']:>4}  {file['path']}"
-        )
+        if "renamed_from" in file:
+            print(f"{file['status']:>5}  {file['renamed_from']} -> {file['path']}")
+        else:
+            print(f"{file['status']:>4}  {file['path']}")
 
     print()
     print("CHANGED FUNCTIONS")
