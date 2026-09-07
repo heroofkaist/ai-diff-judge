@@ -1,6 +1,7 @@
 import argparse
 
 from diff_engine import (
+    build_diff_context,
     diff_from_contents,
     find_changed_functions,
     get_file_at_ref,
@@ -9,12 +10,19 @@ from diff_engine import (
 )
 
 
-def _add_function_items(
-    report, path, base_ref, head_ref, old_path, new_path,
-    use_ai, repo_path, extra_file_fields=None,
+def _collect_function_changes(
+    file_sources, path, base_ref, head_ref, old_path, new_path,
+    repo_path, extra_file_fields=None,
 ):
+    """Fetch sources/diff for one file and return its changed functions.
+
+    Also records new_path's full new-version source into file_sources, so
+    a full-diff context can be built later from every touched file, before
+    any function actually gets scored.
+    """
     old_source = get_file_at_ref(base_ref, old_path, repo_path=repo_path)
     new_source = get_file_at_ref(head_ref, new_path, repo_path=repo_path)
+    file_sources[new_path] = new_source
 
     if old_path == new_path:
         diff = get_git_diff(base_ref, head_ref, new_path, repo_path=repo_path)
@@ -22,34 +30,15 @@ def _add_function_items(
         diff = diff_from_contents(old_source, new_source)
 
     if not diff:
-        return
+        return None
 
     changed_functions = find_changed_functions(old_source, new_source, diff)
 
     file_entry = {"status": None, "path": path, "changed_functions": len(changed_functions)}
     if extra_file_fields:
         file_entry.update(extra_file_fields)
-    report["files"].append(file_entry)
 
-    for function in changed_functions:
-        item = {
-            "path": path,
-            "name": function["name"],
-            "type": "new" if function["old"] is None else "modified",
-            "changed_new_lines": function["changed_new_lines"],
-            "changed_old_lines": function["changed_old_lines"],
-        }
-
-        if use_ai and function["old"] is not None:
-            from judge import score_code
-
-            item["verdict"] = score_code(
-                function["name"],
-                function["old"]["code"],
-                function["new"]["code"],
-            )
-
-        report["functions"].append(item)
+    return file_entry, changed_functions
 
 
 def analyze_branch_pair(
@@ -69,6 +58,9 @@ def analyze_branch_pair(
         "functions": [],
     }
 
+    file_sources = {}
+    pending_functions = []
+
     for status, old_path, new_path in changes:
         if not new_path.endswith(".py"):
             continue
@@ -79,6 +71,11 @@ def analyze_branch_pair(
                 {"path": new_path, "name": None, "type": "added_file",
                  "changed_new_lines": [], "changed_old_lines": []}
             )
+            if use_ai:
+                try:
+                    file_sources[new_path] = get_file_at_ref(head_ref, new_path, repo_path=repo_path)
+                except FileNotFoundError:
+                    pass
             continue
 
         if status.startswith("D"):
@@ -98,20 +95,55 @@ def analyze_branch_pair(
                     {"path": new_path, "name": None, "type": "renamed_file",
                      "changed_new_lines": [], "changed_old_lines": []}
                 )
+                if use_ai:
+                    try:
+                        file_sources[new_path] = get_file_at_ref(head_ref, new_path, repo_path=repo_path)
+                    except FileNotFoundError:
+                        pass
                 continue
 
-            _add_function_items(
-                report, new_path, base_ref, head_ref, old_path, new_path,
-                use_ai, repo_path,
+            result = _collect_function_changes(
+                file_sources, new_path, base_ref, head_ref, old_path, new_path,
+                repo_path,
                 extra_file_fields={"status": status, "renamed_from": old_path},
             )
+            if result:
+                pending_functions.append(result)
             continue
 
-        _add_function_items(
-            report, new_path, base_ref, head_ref, new_path, new_path,
-            use_ai, repo_path,
+        result = _collect_function_changes(
+            file_sources, new_path, base_ref, head_ref, new_path, new_path,
+            repo_path,
             extra_file_fields={"status": status},
         )
+        if result:
+            pending_functions.append(result)
+
+    diff_context = build_diff_context(file_sources) if use_ai else ""
+
+    for file_entry, changed_functions in pending_functions:
+        report["files"].append(file_entry)
+
+        for function in changed_functions:
+            item = {
+                "path": file_entry["path"],
+                "name": function["name"],
+                "type": "new" if function["old"] is None else "modified",
+                "changed_new_lines": function["changed_new_lines"],
+                "changed_old_lines": function["changed_old_lines"],
+            }
+
+            if use_ai and function["old"] is not None:
+                from judge import score_code
+
+                item["verdict"] = score_code(
+                    function["name"],
+                    function["old"]["code"],
+                    function["new"]["code"],
+                    diff_context=diff_context,
+                )
+
+            report["functions"].append(item)
 
     return report
 

@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from github import Github, Auth
 
 from chunker import extract_functions
-from diff_engine import find_changed_functions
+from diff_engine import build_diff_context, find_changed_functions
 from judge import score_code
 
 
@@ -45,6 +45,9 @@ def analyze_pr(repo_name: str, pr_number: int):
     analyzed_functions = 0
     changed_python_files = 0
 
+    file_sources = {}
+    pending_files = []
+
     for file in pr.get_files():
         if not file.filename.endswith(".py"):
             continue
@@ -73,6 +76,8 @@ def analyze_pr(repo_name: str, pr_number: int):
             )
             continue
 
+        file_sources[file.filename] = new_source
+
         changed_functions = find_changed_functions(
             old_source,
             new_source,
@@ -86,7 +91,12 @@ def analyze_pr(repo_name: str, pr_number: int):
             )
             continue
 
-        print(f"\n[Файл: {file.filename}]")
+        pending_files.append((file.filename, changed_functions))
+
+    diff_context = build_diff_context(file_sources)
+
+    for filename, changed_functions in pending_files:
+        print(f"\n[Файл: {filename}]")
 
         for item in changed_functions:
             name = item["name"]
@@ -101,7 +111,7 @@ def analyze_pr(repo_name: str, pr_number: int):
             )
 
             final_review += (
-                f"### 🔍 `{file.filename}::{name}`\n\n"
+                f"### 🔍 `{filename}::{name}`\n\n"
                 f"Changed lines: `{changed_lines}`\n\n"
             )
 
@@ -122,6 +132,7 @@ def analyze_pr(repo_name: str, pr_number: int):
                 name,
                 old_function["code"],
                 new_function["code"],
+                diff_context=diff_context,
             )
 
             total_delta += verdict.get("weighted_delta", 0)

@@ -104,6 +104,33 @@ def parse_diff(diff: str) -> dict:
     }
 
 
+MAX_DIFF_CONTEXT_CHARS = 200_000
+
+
+def build_diff_context(file_sources: dict[str, str]) -> str:
+    """Format every touched file's full new-version source into one block.
+
+    Passed to the LLM judge alongside an isolated function so it can check
+    whether a symbol the function calls (a helper added elsewhere in the
+    same diff) actually exists, instead of judging the function as a fully
+    self-contained snippet with no view of the rest of the change.
+    """
+    blocks = [
+        f"# File: {path}\n{source}"
+        for path, source in file_sources.items()
+    ]
+
+    context = "\n\n".join(blocks)
+
+    if len(context) > MAX_DIFF_CONTEXT_CHARS:
+        context = (
+            context[:MAX_DIFF_CONTEXT_CHARS]
+            + "\n\n... (truncated, diff too large to fit in full context)"
+        )
+
+    return context
+
+
 def diff_from_contents(old_content: str, new_content: str) -> str:
     """Build a unified diff from two in-memory file contents.
 

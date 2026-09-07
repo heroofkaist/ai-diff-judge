@@ -88,12 +88,35 @@ def compare_code(function_name: str, old_code: str, new_code: str) -> dict:
     return result
 
 
-def score_code(function_name: str, old_code: str, new_code: str) -> dict:
-    """Compares two versions of a function with per-criterion scores and confidence."""
+def score_code(function_name: str, old_code: str, new_code: str, diff_context: str = "") -> dict:
+    """Compares two versions of a function with per-criterion scores and confidence.
+
+    diff_context, when provided, is the full source of every file touched by
+    the surrounding diff (see diff_engine.build_diff_context). It lets the
+    model verify that a symbol the function calls (a helper added elsewhere
+    in the same change) actually exists, instead of judging the function as
+    a fully isolated snippet with no view of the rest of the diff.
+    """
+    context_section = ""
+
+    if diff_context:
+        context_section = f"""
+    For reference only, here is the full content of every file touched by
+    this same diff. Use it ONLY to check whether a name the function calls
+    (a function, class, or import added or changed elsewhere in this diff)
+    actually exists somewhere in this change. Do not review or score this
+    reference material itself — only the OLD/NEW function below.
+
+    DIFF CONTEXT:
+```python
+{diff_context}
+```
+"""
+
     prompt = f"""
     You are a strict but fair code reviewer.
     Compare the OLD and NEW versions of the same function.
-
+    {context_section}
     Score each version from 1 to 10 on these criteria:
     correctness (does it work as intended, any bugs?)
     security (any vulnerabilities or unsafe patterns?)

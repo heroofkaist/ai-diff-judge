@@ -1,4 +1,31 @@
-from judge import compare_code, validate_score
+import json
+
+from judge import compare_code, score_code, validate_score
+
+
+class FakeScoreResponse:
+    def __init__(self, content):
+        self._content = content
+
+    class Choice:
+        def __init__(self, content):
+            self.message = type("Message", (), {"content": content})()
+
+    @property
+    def choices(self):
+        return [FakeScoreResponse.Choice(self._content)]
+
+
+_VALID_SCORE_JSON = json.dumps(
+    {
+        "confidence": 0.9,
+        "correctness": {"old": 7, "new": 9, "reason": "fixed a bug"},
+        "security": {"old": 8, "new": 8, "reason": "no change"},
+        "performance": {"old": 6, "new": 6, "reason": "no change"},
+        "readability": {"old": 7, "new": 8, "reason": "clearer"},
+        "bugs_found": [],
+    }
+)
 
 
 class FakeResponse:
@@ -124,6 +151,44 @@ def test_validate_score_invalid_winner():
         "readability": {"old": 7, "new": 8, "reason": "test"},
     }
     assert validate_score(invalid_score) is False
+
+
+def test_score_code_includes_diff_context_in_prompt(monkeypatch):
+    captured = {}
+
+    def fake_create(*args, **kwargs):
+        captured["prompt"] = kwargs["messages"][0]["content"]
+        return FakeScoreResponse(_VALID_SCORE_JSON)
+
+    monkeypatch.setattr("judge.client.chat.completions.create", fake_create)
+
+    score_code(
+        "process_item",
+        "def process_item(x):\n    return old_helper(x)",
+        "def process_item(x):\n    return new_helper(x)",
+        diff_context="# File: helpers.py\ndef new_helper(x):\n    return x * 2",
+    )
+
+    assert "new_helper" in captured["prompt"]
+    assert "DIFF CONTEXT" in captured["prompt"]
+
+
+def test_score_code_omits_context_section_when_not_given(monkeypatch):
+    captured = {}
+
+    def fake_create(*args, **kwargs):
+        captured["prompt"] = kwargs["messages"][0]["content"]
+        return FakeScoreResponse(_VALID_SCORE_JSON)
+
+    monkeypatch.setattr("judge.client.chat.completions.create", fake_create)
+
+    score_code(
+        "add",
+        "def add(a, b):\n    return a + b",
+        "def add(a, b):\n    return a + b  # noop comment",
+    )
+
+    assert "DIFF CONTEXT" not in captured["prompt"]
 
 
 def test_validate_score_invalid_confidence():
