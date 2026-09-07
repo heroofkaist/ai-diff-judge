@@ -126,9 +126,9 @@ def analyze_branch_pair(
             }
 
             if use_ai and function["old"] is not None:
-                from judge import compare_code
+                from judge import score_code
 
-                item["verdict"] = compare_code(
+                item["verdict"] = score_code(
                     function["name"],
                     function["old"]["code"],
                     function["new"]["code"],
@@ -173,21 +173,15 @@ def print_report(report: dict) -> None:
         function_type = function["type"]
 
         if function_type == "added_file":
-            print(
-                f"NEW FILE     {function['path']}"
-            )
+            print(f"NEW FILE     {function['path']}")
             continue
 
         if function_type == "deleted_file":
-            print(
-                f"DELETED FILE {function['path']}"
-            )
+            print(f"DELETED FILE {function['path']}")
             continue
 
         if function_type == "renamed_file":
-            print(
-                f"RENAMED FILE {function['path']}"
-            )
+            print(f"RENAMED FILE {function['path']}")
             continue
 
         lines = ", ".join(
@@ -204,15 +198,43 @@ def print_report(report: dict) -> None:
         if "verdict" in function:
             verdict = function["verdict"]
 
-            print(
-                f"   AI winner: "
-                f"{verdict.get('winner', 'tie')}"
-            )
+            print(f"   Winner: {verdict.get('winner', 'tie')} (confidence: {verdict.get('confidence', 0.0):.2f})")
 
-            print(
-                f"   Reason: "
-                f"{verdict.get('reason', '')}"
-            )
+            for criterion in ("correctness", "security", "performance", "readability"):
+                c = verdict.get(criterion, {})
+                print(f"   {criterion:<12} old={c.get('old', '?')} new={c.get('new', '?')}  {c.get('reason', 'no data')}")
+
+    total_delta = sum(
+        function["verdict"].get("weighted_delta", 0)
+        for function in report["functions"]
+        if "verdict" in function
+    )
+
+    all_bugs = [
+        bug
+        for function in report["functions"]
+        if "verdict" in function
+        for bug in function["verdict"].get("bugs_found", [])
+    ]
+
+    print()
+    print("WEIGHTED SUMMARY")
+    print("-" * 60)
+    print(f"Total weighted delta: {total_delta:+.1f}")
+
+    if total_delta > 0:
+        print("Overall: NEW is better")
+    elif total_delta < 0:
+        print("Overall: OLD is better")
+    else:
+        print("Overall: TIE")
+
+    if all_bugs:
+        print()
+        print("BUGS FOUND")
+        print("-" * 60)
+        for bug in all_bugs:
+            print(f"- {bug}")
 
 
 def main() -> None:
