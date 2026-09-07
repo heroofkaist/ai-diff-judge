@@ -76,7 +76,7 @@ The core trick is that instead of dumping an entire file at an LLM and hoping fo
 * Self measured benchmark. 87.5% agreement with human judgment, and growing (see benchmark folder).
 * 11 passing tests covering the diff parser, chunker, and judge logic.
 * Runs automatically on every PR via GitHub Actions.
-* 100% free. Runs on Groq's free tier, no API costs.
+* Runs on Groq's free tier — no API costs, but see the rate-limit warning below before pointing it at a high-traffic repo.
 
 ## 🚀 Quick start
 
@@ -133,7 +133,9 @@ WITHOUT context: "New calls undefined normalize, causing runtime error." (false 
 WITH context:    "The new function applies strip and lower, which is likely the intended behavior." (correct)
 ```
 
-Context is capped at 200,000 characters per run to stay within the model's context window on very large diffs; beyond that it's truncated with a note in the prompt.
+Confirmed working across files in production: reviewing this repo's own PRs, the judge correctly recognized helper functions and classes defined in sibling files as part of the same change, instead of flagging them as missing.
+
+**⚠️ Cost/rate-limit warning:** shipping full-diff context makes every single function judged send a much bigger request than before. Groq's free/on-demand tier caps `openai/gpt-oss-20b` at 8,000 tokens per request (not the model's real context window), so this repo trims context to fit that budget per call, cutting only at whole-file boundaries (never mid-function) and falling back to no context at all if a request still fails. Even so, a PR touching several files burns through Groq's free-tier quota noticeably faster than the old isolated-function approach did. If you're running this against a busy repo on a free API key, expect to hit rate limits during heavy use — the tool degrades gracefully (falls back to a plain tie/no-verdict rather than crashing), but don't lean on it for high-volume automated review unless you're on a paid Groq tier.
 
 ## 🗺️ Roadmap
 
