@@ -99,8 +99,14 @@ def compare_code(function_name: str, old_code: str, new_code: str) -> dict:
 def _truncate_context_to_budget(diff_context: str, old_code: str, new_code: str, function_name: str) -> str:
     """Shrink diff_context so the whole request fits Groq's per-call token cap.
 
+    Cuts at whole-file boundaries (as formatted by diff_engine.build_diff_context)
+    rather than an arbitrary character offset. A raw character slice can cut a
+    file mid-function, handing the model a syntactically broken snippet — which
+    in practice made it produce malformed JSON that failed Groq's response
+    validation entirely, rather than just seeing a smaller-but-valid context.
+
     Uses a rough chars-per-token estimate since we don't tokenize locally;
-    a real 413 is still handled as a fallback by the caller if this
+    an actual 413 is still handled as a fallback by the caller if this
     estimate runs a little hot.
     """
     if not diff_context:
@@ -116,13 +122,31 @@ def _truncate_context_to_budget(diff_context: str, old_code: str, new_code: str,
     if len(diff_context) <= budget_chars:
         return diff_context
 
-    return diff_context[:budget_chars] + "\n\n... (truncated to fit the model's token budget)"
+    raw_blocks = diff_context.split("\n\n# File: ")
+    file_blocks = [raw_blocks[0]] + [f"# File: {block}" for block in raw_blocks[1:]]
 
+    kept_blocks = []
+    running_len = 0
 
-def _is_request_too_large(exc: Exception) -> bool:
-    status_code = getattr(exc, "status_code", None)
-    message = str(exc).lower()
-    return status_code in (413, 429) or "too large" in message or "rate_limit_exceeded" in message
+    for block in file_blocks:
+        addition = len(block) + (2 if kept_blocks else 0)
+
+        if running_len + addition > budget_chars:
+            break
+
+        kept_blocks.append(block)
+        running_len += addition
+
+    if not kept_blocks:
+        return ""
+
+    truncated = "\n\n".join(kept_blocks)
+    omitted = len(file_blocks) - len(kept_blocks)
+
+    if omitted > 0:
+        truncated += f"\n\n... ({omitted} additional file(s) omitted to fit the model's token budget)"
+
+    return truncated
 
 
 def _request_score(function_name: str, old_code: str, new_code: str, diff_context: str):
@@ -199,7 +223,11 @@ def score_code(function_name: str, old_code: str, new_code: str, diff_context: s
     try:
         response = _request_score(function_name, old_code, new_code, diff_context)
     except Exception as exc:
-        if diff_context and _is_request_too_large(exc):
+        # Any failure while diff_context is attached — a rate limit, a
+        # request-too-large error, or the model producing invalid JSON that
+        # Groq's response validator rejects outright — gets one retry with
+        # no context at all, rather than losing the whole PR/branch review.
+        if diff_context:
             try:
                 response = _request_score(function_name, old_code, new_code, "")
             except Exception as retry_exc:
