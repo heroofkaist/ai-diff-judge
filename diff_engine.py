@@ -9,6 +9,30 @@ HUNK_RE = re.compile(
 )
 
 
+def _newline_only_change_end(lines: list[str], i: int) -> int | None:
+    """Detect a '-content'/'+content' pair that differs only by a trailing
+    newline (git shows a '\\ No newline at end of file' marker around it).
+
+    Returns the index right after the matched block, or None if the line
+    at `i` isn't the start of such a pair.
+    """
+    removed_content = lines[i][1:]
+    j = i + 1
+
+    if j < len(lines) and lines[j].startswith("\\"):
+        j += 1
+
+    if j < len(lines) and lines[j].startswith("+") and lines[j][1:] == removed_content:
+        end = j + 1
+
+        if end < len(lines) and lines[end].startswith("\\"):
+            end += 1
+
+        return end
+
+    return None
+
+
 def parse_diff(diff: str) -> dict:
     """Parse unified diff and return changed lines with coordinates."""
     added_lines = []
@@ -17,18 +41,44 @@ def parse_diff(diff: str) -> dict:
     old_line_number = None
     new_line_number = None
 
-    for line in diff.splitlines():
+    lines = diff.splitlines()
+    i = 0
+
+    while i < len(lines):
+        line = lines[i]
         match = HUNK_RE.match(line)
 
         if match:
             old_line_number = int(match.group(1))
             new_line_number = int(match.group(2))
+            i += 1
             continue
 
         if line.startswith("+++ ") or line.startswith("--- "):
+            i += 1
             continue
 
         if old_line_number is None or new_line_number is None:
+            i += 1
+            continue
+
+        if line.startswith("-"):
+            end = _newline_only_change_end(lines, i)
+
+            if end is not None:
+                old_line_number += 1
+                new_line_number += 1
+                i = end
+                continue
+
+            removed_lines.append(
+                {
+                    "line": old_line_number,
+                    "content": line[1:],
+                }
+            )
+            old_line_number += 1
+            i += 1
             continue
 
         if line.startswith("+"):
@@ -39,24 +89,50 @@ def parse_diff(diff: str) -> dict:
                 }
             )
             new_line_number += 1
+            i += 1
+            continue
 
-        elif line.startswith("-"):
-            removed_lines.append(
-                {
-                    "line": old_line_number,
-                    "content": line[1:],
-                }
-            )
-            old_line_number += 1
-
-        elif line.startswith(" "):
+        if line.startswith(" "):
             old_line_number += 1
             new_line_number += 1
+
+        i += 1
 
     return {
         "added_lines": added_lines,
         "removed_lines": removed_lines,
     }
+
+
+# A sanity cap only, so a huge diff doesn't build a multi-megabyte string
+# before anyone gets a chance to trim it further. The actual per-request
+# budget is much smaller and enforced by judge.score_code, which trims
+# this down based on the real token limit the model API imposes per call.
+MAX_DIFF_CONTEXT_CHARS = 60_000
+
+
+def build_diff_context(file_sources: dict[str, str]) -> str:
+    """Format every touched file's full new-version source into one block.
+
+    Passed to the LLM judge alongside an isolated function so it can check
+    whether a symbol the function calls (a helper added elsewhere in the
+    same diff) actually exists, instead of judging the function as a fully
+    self-contained snippet with no view of the rest of the change.
+    """
+    blocks = [
+        f"# File: {path}\n{source}"
+        for path, source in file_sources.items()
+    ]
+
+    context = "\n\n".join(blocks)
+
+    if len(context) > MAX_DIFF_CONTEXT_CHARS:
+        context = (
+            context[:MAX_DIFF_CONTEXT_CHARS]
+            + "\n\n... (truncated, diff too large to fit in full context)"
+        )
+
+    return context
 
 
 def diff_from_contents(old_content: str, new_content: str) -> str:

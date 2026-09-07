@@ -19,6 +19,14 @@ CRITERIA_WEIGHTS = {
     "readability": 1,
 }
 
+# Groq's free/on-demand tier enforces an 8000 tokens-per-minute cap per
+# request for this model — much smaller than the model's actual context
+# window. This budget is enforced per call, not just as a sanity cap.
+GROQ_TPM_LIMIT = 8000
+RESPONSE_TOKEN_RESERVE = 800
+CHARS_PER_TOKEN_ESTIMATE = 4
+PROMPT_BOILERPLATE_CHARS = 1500
+
 
 def evaluate_code(function_name: str, function_code: str) -> str:
     prompt = f"""
@@ -88,12 +96,80 @@ def compare_code(function_name: str, old_code: str, new_code: str) -> dict:
     return result
 
 
-def score_code(function_name: str, old_code: str, new_code: str) -> dict:
-    """Compares two versions of a function with per-criterion scores and confidence."""
+def _truncate_context_to_budget(diff_context: str, old_code: str, new_code: str, function_name: str) -> str:
+    """Shrink diff_context so the whole request fits Groq's per-call token cap.
+
+    Cuts at whole-file boundaries (as formatted by diff_engine.build_diff_context)
+    rather than an arbitrary character offset. A raw character slice can cut a
+    file mid-function, handing the model a syntactically broken snippet — which
+    in practice made it produce malformed JSON that failed Groq's response
+    validation entirely, rather than just seeing a smaller-but-valid context.
+
+    Uses a rough chars-per-token estimate since we don't tokenize locally;
+    an actual 413 is still handled as a fallback by the caller if this
+    estimate runs a little hot.
+    """
+    if not diff_context:
+        return diff_context
+
+    fixed_chars = len(old_code) + len(new_code) + len(function_name) + PROMPT_BOILERPLATE_CHARS
+    budget_tokens = GROQ_TPM_LIMIT - RESPONSE_TOKEN_RESERVE
+    budget_chars = budget_tokens * CHARS_PER_TOKEN_ESTIMATE - fixed_chars
+
+    if budget_chars <= 0:
+        return ""
+
+    if len(diff_context) <= budget_chars:
+        return diff_context
+
+    raw_blocks = diff_context.split("\n\n# File: ")
+    file_blocks = [raw_blocks[0]] + [f"# File: {block}" for block in raw_blocks[1:]]
+
+    kept_blocks = []
+    running_len = 0
+
+    for block in file_blocks:
+        addition = len(block) + (2 if kept_blocks else 0)
+
+        if running_len + addition > budget_chars:
+            break
+
+        kept_blocks.append(block)
+        running_len += addition
+
+    if not kept_blocks:
+        return ""
+
+    truncated = "\n\n".join(kept_blocks)
+    omitted = len(file_blocks) - len(kept_blocks)
+
+    if omitted > 0:
+        truncated += f"\n\n... ({omitted} additional file(s) omitted to fit the model's token budget)"
+
+    return truncated
+
+
+def _request_score(function_name: str, old_code: str, new_code: str, diff_context: str):
+    context_section = ""
+
+    if diff_context:
+        context_section = f"""
+    For reference only, here is the full content of every file touched by
+    this same diff. Use it ONLY to check whether a name the function calls
+    (a function, class, or import added or changed elsewhere in this diff)
+    actually exists somewhere in this change. Do not review or score this
+    reference material itself — only the OLD/NEW function below.
+
+    DIFF CONTEXT:
+```python
+{diff_context}
+```
+"""
+
     prompt = f"""
     You are a strict but fair code reviewer.
     Compare the OLD and NEW versions of the same function.
-
+    {context_section}
     Score each version from 1 to 10 on these criteria:
     correctness (does it work as intended, any bugs?)
     security (any vulnerabilities or unsafe patterns?)
@@ -125,11 +201,39 @@ def score_code(function_name: str, old_code: str, new_code: str) -> dict:
 {new_code}
 ```
     """
-    response = client.chat.completions.create(
+    return client.chat.completions.create(
         model="openai/gpt-oss-20b",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.0,
+        response_format={"type": "json_object"},
     )
+
+
+def score_code(function_name: str, old_code: str, new_code: str, diff_context: str = "") -> dict:
+    """Compares two versions of a function with per-criterion scores and confidence.
+
+    diff_context, when provided, is the full source of every file touched by
+    the surrounding diff (see diff_engine.build_diff_context). It lets the
+    model verify that a symbol the function calls (a helper added elsewhere
+    in the same change) actually exists, instead of judging the function as
+    a fully isolated snippet with no view of the rest of the diff.
+    """
+    diff_context = _truncate_context_to_budget(diff_context, old_code, new_code, function_name)
+
+    try:
+        response = _request_score(function_name, old_code, new_code, diff_context)
+    except Exception as exc:
+        # Any failure while diff_context is attached — a rate limit, a
+        # request-too-large error, or the model producing invalid JSON that
+        # Groq's response validator rejects outright — gets one retry with
+        # no context at all, rather than losing the whole PR/branch review.
+        if diff_context:
+            try:
+                response = _request_score(function_name, old_code, new_code, "")
+            except Exception as retry_exc:
+                return _empty_score(f"Groq API error even without diff context: {retry_exc}")
+        else:
+            return _empty_score(f"Groq API error: {exc}")
 
     raw = response.choices[0].message.content.strip()
 
@@ -177,6 +281,30 @@ def _empty_score(error_message: str) -> dict:
         "performance": empty_criterion,
         "readability": empty_criterion,
     }
+
+
+def validate_score(score: dict) -> bool:
+    """Validate that a score dict has all required fields with correct types."""
+    required_fields = ["winner", "confidence", "weighted_delta", "bugs_found"]
+    required_criteria = ["correctness", "security", "performance", "readability"]
+
+    for field in required_fields:
+        if field not in score:
+            return False
+
+    for criterion in required_criteria:
+        if criterion not in score or not isinstance(score[criterion], dict):
+            return False
+        if "old" not in score[criterion] or "new" not in score[criterion]:
+            return False
+
+    if not isinstance(score.get("winner"), str) or score["winner"] not in ("old", "new", "tie"):
+        return False
+
+    if not isinstance(score.get("confidence"), (int, float)) or not (0 <= score["confidence"] <= 1):
+        return False
+
+    return True
 
 
 if __name__ == "__main__":

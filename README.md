@@ -76,7 +76,7 @@ The core trick is that instead of dumping an entire file at an LLM and hoping fo
 * Self measured benchmark. 87.5% agreement with human judgment, and growing (see benchmark folder).
 * 11 passing tests covering the diff parser, chunker, and judge logic.
 * Runs automatically on every PR via GitHub Actions.
-* 100% free. Runs on Groq's free tier, no API costs.
+* Runs on Groq's free tier — no API costs, but see the rate-limit warning below before pointing it at a high-traffic repo.
 
 ## 🚀 Quick start
 
@@ -120,11 +120,22 @@ python3 run_pairwise_benchmark.py
 
 Current result is 23 out of 24, or 95.8%, agreement with human judgment across all categories. Security, bug fixes, performance, and breaking change detection all score 100%. The one remaining disagreement is in the style only category, where the model consistently favors f-strings over string concatenation on efficiency grounds, a defensible position rather than a model error.
 
-## ⚠️ Known limitation
+## 🔭 Full-diff context
 
-Each function is judged in isolation, without seeing the rest of the diff or the wider codebase. This means the model can flag a false alarm when a function calls something defined elsewhere in the same change, since it has no way to confirm that the called function actually exists. In one real test, it warned that a new `score_code` import might not exist, even though the function was defined a few lines away in a sibling file within the very same diff.
+Judging a function in complete isolation has a failure mode: the model can flag a false alarm when a function calls something defined elsewhere in the same change, since it has no way to confirm that the called function actually exists. Early versions of this tool hit exactly that, warning that a new `score_code` import might not exist even though it was defined a few lines away in a sibling file within the very same diff.
 
-This mirrors a known challenge in AI-based code and video judging generally, closely related to what the WorldReward paper (arXiv:2609.03952) calls "localized evidence": judging a small slice of change accurately, without losing the surrounding context that explains it. A more complete fix would involve passing broader context (e.g. the full diff, or a symbol table of the change) into the prompt, rather than judging each function as a fully self-contained unit.
+This mirrors a known challenge in AI-based code and video judging generally, closely related to what the WorldReward paper (arXiv:2609.03952) calls "localized evidence": judging a small slice of change accurately, without losing the surrounding context that explains it.
+
+The fix: every changed file's full new-version source is collected once per run and passed alongside each function as reference-only context, so the model can check whether a symbol actually exists somewhere in the diff before flagging it as missing. For example:
+
+```
+WITHOUT context: "New calls undefined normalize, causing runtime error." (false positive)
+WITH context:    "The new function applies strip and lower, which is likely the intended behavior." (correct)
+```
+
+Confirmed working across files in production: reviewing this repo's own PRs, the judge correctly recognized helper functions and classes defined in sibling files as part of the same change, instead of flagging them as missing.
+
+**⚠️ Cost/rate-limit warning:** shipping full-diff context makes every single function judged send a much bigger request than before. Groq's free/on-demand tier caps `openai/gpt-oss-20b` at 8,000 tokens per request (not the model's real context window), so this repo trims context to fit that budget per call, cutting only at whole-file boundaries (never mid-function) and falling back to no context at all if a request still fails. Even so, a PR touching several files burns through Groq's free-tier quota noticeably faster than the old isolated-function approach did. If you're running this against a busy repo on a free API key, expect to hit rate limits during heavy use — the tool degrades gracefully (falls back to a plain tie/no-verdict rather than crashing), but don't lean on it for high-volume automated review unless you're on a paid Groq tier.
 
 ## 🗺️ Roadmap
 

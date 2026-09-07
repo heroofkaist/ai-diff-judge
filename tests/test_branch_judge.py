@@ -201,6 +201,54 @@ def test_analyze_branch_pair_detects_new_python_file(tmp_path):
     } in result["functions"]
 
 
+def test_analyze_branch_pair_passes_full_diff_context_to_judge(tmp_path, monkeypatch):
+    run_git(tmp_path, "init")
+    run_git(tmp_path, "config", "user.name", "Test User")
+    run_git(tmp_path, "config", "user.email", "test@example.com")
+
+    write_file(
+        tmp_path,
+        "app.py",
+        """def calculate():
+    return 10
+""",
+    )
+    run_git(tmp_path, "add", "app.py")
+    run_git(tmp_path, "commit", "-m", "base")
+    run_git(tmp_path, "branch", "-M", "main")
+    run_git(tmp_path, "checkout", "-b", "feature")
+
+    write_file(
+        tmp_path,
+        "app.py",
+        """def calculate():
+    return double(10)
+""",
+    )
+    write_file(
+        tmp_path,
+        "helper.py",
+        """def double(x):
+    return x * 2
+""",
+    )
+    run_git(tmp_path, "add", "app.py", "helper.py")
+    run_git(tmp_path, "commit", "-m", "add helper and use it")
+
+    captured = {}
+
+    def fake_score_code(name, old_code, new_code, diff_context=""):
+        captured["diff_context"] = diff_context
+        return {"winner": "tie", "confidence": 1.0, "weighted_delta": 0, "bugs_found": []}
+
+    monkeypatch.setattr("judge.score_code", fake_score_code)
+
+    analyze_branch_pair("main", "feature", use_ai=True, repo_path=tmp_path)
+
+    assert "double" in captured["diff_context"]
+    assert "helper.py" in captured["diff_context"]
+
+
 def test_analyze_branch_pair_detects_deleted_python_file(tmp_path):
     run_git(tmp_path, "init")
     run_git(
