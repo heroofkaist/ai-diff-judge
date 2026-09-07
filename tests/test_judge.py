@@ -191,6 +191,82 @@ def test_score_code_omits_context_section_when_not_given(monkeypatch):
     assert "DIFF CONTEXT" not in captured["prompt"]
 
 
+def test_score_code_truncates_huge_diff_context_to_fit_token_budget(monkeypatch):
+    captured = {}
+
+    def fake_create(*args, **kwargs):
+        prompt = kwargs["messages"][0]["content"]
+        captured["prompt"] = prompt
+        return FakeScoreResponse(_VALID_SCORE_JSON)
+
+    monkeypatch.setattr("judge.client.chat.completions.create", fake_create)
+
+    huge_context = "x = 1\n" * 50_000  # ~350,000 chars, way over any per-call budget
+
+    score_code(
+        "add",
+        "def add(a, b):\n    return a + b",
+        "def add(a, b):\n    return a + b",
+        diff_context=huge_context,
+    )
+
+    # The full 350k-char blob must never reach the API call.
+    assert len(captured["prompt"]) < len(huge_context)
+    assert "truncated" in captured["prompt"]
+
+
+def test_score_code_retries_without_context_on_request_too_large(monkeypatch):
+    calls = []
+
+    class TooLargeError(Exception):
+        status_code = 413
+
+    def fake_create(*args, **kwargs):
+        prompt = kwargs["messages"][0]["content"]
+        calls.append(prompt)
+
+        if "DIFF CONTEXT" in prompt:
+            raise TooLargeError("Error code: 413 - Request too large for model, rate_limit_exceeded")
+
+        return FakeScoreResponse(_VALID_SCORE_JSON)
+
+    monkeypatch.setattr("judge.client.chat.completions.create", fake_create)
+
+    result = score_code(
+        "add",
+        "def add(a, b):\n    return a + b",
+        "def add(a, b):\n    return a + b + 0",
+        diff_context="# File: helper.py\ndef helper():\n    pass",
+    )
+
+    assert len(calls) == 2
+    assert "DIFF CONTEXT" in calls[0]
+    assert "DIFF CONTEXT" not in calls[1]
+    assert result["winner"] == "new"
+    assert result["confidence"] == 0.9
+
+
+def test_score_code_falls_back_to_empty_score_if_retry_also_fails(monkeypatch):
+    class TooLargeError(Exception):
+        status_code = 413
+
+    def fake_create(*args, **kwargs):
+        raise TooLargeError("Error code: 413 - Request too large, rate_limit_exceeded")
+
+    monkeypatch.setattr("judge.client.chat.completions.create", fake_create)
+
+    result = score_code(
+        "add",
+        "def add(a, b):\n    return a + b",
+        "def add(a, b):\n    return a + b + 0",
+        diff_context="# File: helper.py\ndef helper():\n    pass",
+    )
+
+    assert result["winner"] == "tie"
+    assert result["confidence"] == 0.0
+    assert "Groq API error" in result["correctness"]["reason"]
+
+
 def test_validate_score_invalid_confidence():
     invalid_score = {
         "winner": "new",

@@ -104,7 +104,11 @@ def parse_diff(diff: str) -> dict:
     }
 
 
-MAX_DIFF_CONTEXT_CHARS = 200_000
+# A sanity cap only, so a huge diff doesn't build a multi-megabyte string
+# before anyone gets a chance to trim it further. The actual per-request
+# budget is much smaller and enforced by judge.score_code, which trims
+# this down based on the real token limit the model API imposes per call.
+MAX_DIFF_CONTEXT_CHARS = 60_000
 
 
 def build_diff_context(file_sources: dict[str, str]) -> str:

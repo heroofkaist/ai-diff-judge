@@ -19,6 +19,14 @@ CRITERIA_WEIGHTS = {
     "readability": 1,
 }
 
+# Groq's free/on-demand tier enforces an 8000 tokens-per-minute cap per
+# request for this model — much smaller than the model's actual context
+# window. This budget is enforced per call, not just as a sanity cap.
+GROQ_TPM_LIMIT = 8000
+RESPONSE_TOKEN_RESERVE = 800
+CHARS_PER_TOKEN_ESTIMATE = 4
+PROMPT_BOILERPLATE_CHARS = 1500
+
 
 def evaluate_code(function_name: str, function_code: str) -> str:
     prompt = f"""
@@ -88,15 +96,36 @@ def compare_code(function_name: str, old_code: str, new_code: str) -> dict:
     return result
 
 
-def score_code(function_name: str, old_code: str, new_code: str, diff_context: str = "") -> dict:
-    """Compares two versions of a function with per-criterion scores and confidence.
+def _truncate_context_to_budget(diff_context: str, old_code: str, new_code: str, function_name: str) -> str:
+    """Shrink diff_context so the whole request fits Groq's per-call token cap.
 
-    diff_context, when provided, is the full source of every file touched by
-    the surrounding diff (see diff_engine.build_diff_context). It lets the
-    model verify that a symbol the function calls (a helper added elsewhere
-    in the same change) actually exists, instead of judging the function as
-    a fully isolated snippet with no view of the rest of the diff.
+    Uses a rough chars-per-token estimate since we don't tokenize locally;
+    a real 413 is still handled as a fallback by the caller if this
+    estimate runs a little hot.
     """
+    if not diff_context:
+        return diff_context
+
+    fixed_chars = len(old_code) + len(new_code) + len(function_name) + PROMPT_BOILERPLATE_CHARS
+    budget_tokens = GROQ_TPM_LIMIT - RESPONSE_TOKEN_RESERVE
+    budget_chars = budget_tokens * CHARS_PER_TOKEN_ESTIMATE - fixed_chars
+
+    if budget_chars <= 0:
+        return ""
+
+    if len(diff_context) <= budget_chars:
+        return diff_context
+
+    return diff_context[:budget_chars] + "\n\n... (truncated to fit the model's token budget)"
+
+
+def _is_request_too_large(exc: Exception) -> bool:
+    status_code = getattr(exc, "status_code", None)
+    message = str(exc).lower()
+    return status_code in (413, 429) or "too large" in message or "rate_limit_exceeded" in message
+
+
+def _request_score(function_name: str, old_code: str, new_code: str, diff_context: str):
     context_section = ""
 
     if diff_context:
@@ -148,11 +177,35 @@ def score_code(function_name: str, old_code: str, new_code: str, diff_context: s
 {new_code}
 ```
     """
-    response = client.chat.completions.create(
+    return client.chat.completions.create(
         model="openai/gpt-oss-20b",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.0,
+        response_format={"type": "json_object"},
     )
+
+
+def score_code(function_name: str, old_code: str, new_code: str, diff_context: str = "") -> dict:
+    """Compares two versions of a function with per-criterion scores and confidence.
+
+    diff_context, when provided, is the full source of every file touched by
+    the surrounding diff (see diff_engine.build_diff_context). It lets the
+    model verify that a symbol the function calls (a helper added elsewhere
+    in the same change) actually exists, instead of judging the function as
+    a fully isolated snippet with no view of the rest of the diff.
+    """
+    diff_context = _truncate_context_to_budget(diff_context, old_code, new_code, function_name)
+
+    try:
+        response = _request_score(function_name, old_code, new_code, diff_context)
+    except Exception as exc:
+        if diff_context and _is_request_too_large(exc):
+            try:
+                response = _request_score(function_name, old_code, new_code, "")
+            except Exception as retry_exc:
+                return _empty_score(f"Groq API error even without diff context: {retry_exc}")
+        else:
+            return _empty_score(f"Groq API error: {exc}")
 
     raw = response.choices[0].message.content.strip()
 
