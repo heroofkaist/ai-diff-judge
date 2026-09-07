@@ -39,6 +39,16 @@ def compare_code(function_name: str, old_code: str, new_code: str) -> dict:
     Compare the OLD and NEW versions of the same function on:
     readability, risk of bugs, efficiency.
 
+    If the difference between versions is negligible or purely stylistic
+    (e.g. an added comment, a trivial rename, string formatting with no
+    real functional or performance impact), respond with "tie" instead
+    of picking a winner.
+
+    Respond "tie" only when there is truly no difference in behavior, 
+    readability, or efficiency (e.g. variable renaming, added comments,
+    whitespace changes). If one version is measurably more efficient 
+    or more idiomatic (even slightly), pick that version as the winner.
+
     Respond STRICTLY as JSON, no markdown, no extra text:
     {{"winner": "old" | "new" | "tie", "reason": "brief explanation"}}
 
