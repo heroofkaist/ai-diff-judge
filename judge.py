@@ -179,6 +179,30 @@ def _empty_score(error_message: str) -> dict:
     }
 
 
+def validate_score(score: dict) -> bool:
+    """Validate that a score dict has all required fields with correct types."""
+    required_fields = ["winner", "confidence", "weighted_delta", "bugs_found"]
+    required_criteria = ["correctness", "security", "performance", "readability"]
+
+    for field in required_fields:
+        if field not in score:
+            return False
+
+    for criterion in required_criteria:
+        if criterion not in score or not isinstance(score[criterion], dict):
+            return False
+        if "old" not in score[criterion] or "new" not in score[criterion]:
+            return False
+
+    if not isinstance(score.get("winner"), str) or score["winner"] not in ("old", "new", "tie"):
+        return False
+
+    if not isinstance(score.get("confidence"), (int, float)) or not (0 <= score["confidence"] <= 1):
+        return False
+
+    return True
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python3 judge.py <file_name.py>")

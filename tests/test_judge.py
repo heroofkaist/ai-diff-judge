@@ -1,4 +1,4 @@
-from judge import compare_code
+from judge import compare_code, validate_score
 
 
 class FakeResponse:
@@ -83,3 +83,58 @@ def test_compare_code_invalid_winner_returns_tie(monkeypatch):
 
     assert result["winner"] == "tie"
     assert result["reason"] == "Странный ответ"
+
+
+def test_validate_score_valid():
+    valid_score = {
+        "winner": "new",
+        "confidence": 0.95,
+        "weighted_delta": 5.0,
+        "bugs_found": [],
+        "correctness": {"old": 7, "new": 9, "reason": "Fixed bug"},
+        "security": {"old": 8, "new": 8, "reason": "No change"},
+        "performance": {"old": 6, "new": 7, "reason": "Improved"},
+        "readability": {"old": 7, "new": 8, "reason": "Better names"},
+    }
+    assert validate_score(valid_score) is True
+
+
+def test_validate_score_missing_winner():
+    invalid_score = {
+        "confidence": 0.95,
+        "weighted_delta": 5.0,
+        "bugs_found": [],
+        "correctness": {"old": 7, "new": 9, "reason": "test"},
+        "security": {"old": 8, "new": 8, "reason": "test"},
+        "performance": {"old": 6, "new": 7, "reason": "test"},
+        "readability": {"old": 7, "new": 8, "reason": "test"},
+    }
+    assert validate_score(invalid_score) is False
+
+
+def test_validate_score_invalid_winner():
+    invalid_score = {
+        "winner": "maybe",
+        "confidence": 0.95,
+        "weighted_delta": 5.0,
+        "bugs_found": [],
+        "correctness": {"old": 7, "new": 9, "reason": "test"},
+        "security": {"old": 8, "new": 8, "reason": "test"},
+        "performance": {"old": 6, "new": 7, "reason": "test"},
+        "readability": {"old": 7, "new": 8, "reason": "test"},
+    }
+    assert validate_score(invalid_score) is False
+
+
+def test_validate_score_invalid_confidence():
+    invalid_score = {
+        "winner": "new",
+        "confidence": 1.5,
+        "weighted_delta": 5.0,
+        "bugs_found": [],
+        "correctness": {"old": 7, "new": 9, "reason": "test"},
+        "security": {"old": 8, "new": 8, "reason": "test"},
+        "performance": {"old": 6, "new": 7, "reason": "test"},
+        "readability": {"old": 7, "new": 8, "reason": "test"},
+    }
+    assert validate_score(invalid_score) is False
